@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dashboard Sensor Presencia 🔥</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<h1>📡 Dashboard Sensor Presencia</h1>
+
+<div class="cards-container">
+  <div class="card" id="card-presence">
+    <h2>Estado de Presencia</h2>
+    <div id="presenceStatus" class="presence-status presence-false">😴</div>
+    <div id="presenceText" style="font-size:1.2rem; margin-top: 8px;">Sin presencia</div>
+  </div>
+
+  <div class="card">
+    <h2>Detección Cercana</h2>
+    <div><span id="nearValue" class="value">--</span><span class="unit">m</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Detección Lejana</h2>
+    <div><span id="farValue" class="value">--</span><span class="unit">m</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Sensibilidad</h2>
+    <div><span id="sensitivityValue" class="value">--</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Distancia al Objetivo</h2>
+    <div><span id="targetValue" class="value">--</span><span class="unit">m</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Resultado del Chequeo</h2>
+    <div id="checkingResult" style="font-size:1.4rem; font-weight:600;">--</div>
+  </div>
+</div>
+
+<div class="charts-container">
+  <div class="chart-wrapper"><canvas id="chartNear"></canvas></div>
+  <div class="chart-wrapper"><canvas id="chartFar"></canvas></div>
+  <div class="chart-wrapper"><canvas id="chartSensitivity"></canvas></div>
+  <div class="chart-wrapper"><canvas id="chartTarget"></canvas></div>
+</div>
+
+<footer>
+  Actualización automática cada 5 segundos • Creado por Bryan Cuenca
+</footer>
+
+<script>
+const FIREBASE_URL = "https://sensor-presencia-default-rtdb.firebaseio.com/lecturas.json";
+
+const presenceStatusEl = document.getElementById("presenceStatus");
+const presenceTextEl = document.getElementById("presenceText");
+const nearValueEl = document.getElementById("nearValue");
+const farValueEl = document.getElementById("farValue");
+const sensitivityValueEl = document.getElementById("sensitivityValue");
+const targetValueEl = document.getElementById("targetValue");
+const checkingResultEl = document.getElementById("checkingResult");
+
+// Crear gráficos con Chart.js
+const createChart = (ctx, label, color) => new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label,
+      data: [],
+      fill: true,
+      backgroundColor: color + "33",
+      borderColor: color,
+      borderWidth: 3,
+      tension: 0.3,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+    }]
+  },
+  options: {
+    responsive: true,
+    animation: { duration: 600 },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: { color: "#eee" },
+        grid: { color: "rgba(255,255,255,0.15)" },
+        title: { display: true, text: label, color: "#ccc" }
+      },
+      x: {
+        ticks: { color: "#eee" },
+        grid: { color: "rgba(255,255,255,0.15)" },
+        title: { display: true, text: "Tiempo", color: "#ccc" }
+      }
+    },
+    plugins: {
+      legend: { labels: { color: "#eee" } }
+    }
+  }
+});
+
+const ctxNear = document.getElementById("chartNear").getContext("2d");
+const ctxFar = document.getElementById("chartFar").getContext("2d");
+const ctxSensitivity = document.getElementById("chartSensitivity").getContext("2d");
+const ctxTarget = document.getElementById("chartTarget").getContext("2d");
+
+const chartNear = createChart(ctxNear, "Detección Cercana (m)", "#00d1b2");
+const chartFar = createChart(ctxFar, "Detección Lejana (m)", "#ff3864");
+const chartSensitivity = createChart(ctxSensitivity, "Sensibilidad", "#3273dc");
+const chartTarget = createChart(ctxTarget, "Distancia Objetivo (m)", "#ffdd57");
+
+// Función para actualizar los datos y gráficos
+async function actualizarDashboard() {
+  try {
+    const res = await fetch(FIREBASE_URL);
+    const data = await res.json();
+
+    if (!data) throw new Error("No hay datos");
+
+    const timestamps = Object.keys(data).filter(k => !isNaN(k)).sort();
+    const lastTimestamp = timestamps[timestamps.length - 1];
+    const lectura = data[lastTimestamp];
+
+    if (!lectura) throw new Error("No hay lectura válida");
+
+    // Actualizar cards
+    checkingResultEl.textContent = lectura.checking_result ?? "--";
+    presenceTextEl.textContent = lectura.presence_state === "presence" ? "Presencia Detectada" : "Sin Presencia";
+
+    if(lectura.presence_state === "presence") {
+      presenceStatusEl.textContent = "🟢";
+      presenceStatusEl.classList.remove("presence-false");
+      presenceStatusEl.classList.add("presence-true");
+    } else {
+      presenceStatusEl.textContent = "😴";
+      presenceStatusEl.classList.remove("presence-true");
+      presenceStatusEl.classList.add("presence-false");
+    }
+
+    nearValueEl.textContent = lectura.near_detection ?? "--";
+    farValueEl.textContent = lectura.far_detection ?? "--";
+    sensitivityValueEl.textContent = lectura.sensitivity ?? "--";
+    targetValueEl.textContent = lectura.target_dis_closest ?? "--";
+
+    // Formatear hora para eje X de gráficos
+    const hora = new Date(lastTimestamp * 1000).toLocaleTimeString();
+
+    // Agregar datos a gráficos y mantener max 20 puntos
+    const agregarDatoGrafico = (chart, valor) => {
+      chart.data.labels.push(hora);
+      chart.data.datasets[0].data.push(valor ?? 0);
+      if (chart.data.labels.length > 20) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+      }
+      chart.update();
+    }
+
+    agregarDatoGrafico(chartNear, lectura.near_detection);
+    agregarDatoGrafico(chartFar, lectura.far_detection);
+    agregarDatoGrafico(chartSensitivity, lectura.sensitivity);
+    agregarDatoGrafico(chartTarget, lectura.target_dis_closest);
+
+  } catch (error) {
+    console.error("Error al actualizar dashboard:", error);
+  }
+}
+
+// Actualizar cada 5 segundos
+actualizarDashboard();
+setInterval(actualizarDashboard, 5000);
+</script>
+
+<style>
+/* Reset básico */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0; padding: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+h1 {
+  margin-bottom: 30px;
+  text-align: center;
+  font-weight: 700;
+  text-shadow: 1px 1px 5px rgba(0,0,0,0.3);
+}
+
+.cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+  gap: 20px;
+  width: 100%;
+  max-width: 1000px;
+  margin-bottom: 40px;
+}
+
+.card {
+  background: rgba(255 255 255 / 0.15);
+  border-radius: 15px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: background-color 0.3s ease;
+}
+.card:hover {
+  background: rgba(255 255 255 / 0.3);
+}
+.card h2 {
+  margin: 0 0 10px;
+  font-weight: 700;
+  font-size: 1.3rem;
+}
+.value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.unit {
+  font-size: 1rem;
+  margin-left: 4px;
+  opacity: 0.75;
+}
+.presence-status {
+  font-size: 3.5rem;
+  margin-top: 5px;
+}
+.presence-true {
+  color: #ff3864; /* rojo vibrante */
+}
+.presence-false {
+  color: #23d160; /* verde vibrante */
+}
+
+/* Gráficos */
+.charts-container {
+  width: 100%;
+  max-width: 1000px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 30px;
+  margin-bottom: 50px;
+}
+
+.chart-wrapper {
+  width: 100%;
+  height: 320px;
+  background: rgba(255 255 255 / 0.15);
+  border-radius: 15px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.2);
+  padding: 15px;
+}
+
+.chart-wrapper canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+/* Footer */
+footer {
+  margin-top: 50px;
+  font-size: 0.9rem;
+  opacity: 0.6;
+  text-align: center;
+}
+</style>
